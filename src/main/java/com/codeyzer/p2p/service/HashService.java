@@ -1,14 +1,17 @@
 package com.codeyzer.p2p.service;
 
+import java.security.SecureRandom;
+import java.util.concurrent.ThreadLocalRandom;
+
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
-import java.security.SecureRandom;
-import java.util.concurrent.ThreadLocalRandom;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 
 @Service
+@RequiredArgsConstructor
 public class HashService {
 
     @Value("${file-share.hash-length:4}")

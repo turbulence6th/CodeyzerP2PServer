@@ -1,15 +1,17 @@
 package com.codeyzer.p2p.service.monitoring;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Service;
-
-import javax.annotation.PostConstruct;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Service;
+
+import jakarta.annotation.PostConstruct;
+import lombok.Getter;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Dosya paylaşım işlemlerinin performansını izleyen ve raporlayan servis.
@@ -17,6 +19,7 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class PerformanceMonitorService {
 
     @Getter
@@ -47,7 +50,8 @@ public class PerformanceMonitorService {
         TransferMetric metric = transferMetrics.computeIfAbsent(hash, k -> new TransferMetric());
         metric.recordUpload(fileSize);
         
-        log.debug("Yükleme kaydedildi: {} - {} bytes", hash, fileSize);
+        double fileSizeMB = fileSize / (1024.0 * 1024.0);
+        log.info("Yükleme kaydedildi: {} - {} MB dosya yüklendi", hash, String.format("%.2f", fileSizeMB));
     }
     
     /**
@@ -64,8 +68,11 @@ public class PerformanceMonitorService {
         metric.recordDownload(fileSize, timeMs);
         
         double speedMbps = calculateSpeedMbps(fileSize, timeMs);
-        log.debug("İndirme kaydedildi: {} - {} bytes, {} ms (hız: {} Mbps)",
-                 hash, fileSize, timeMs, speedMbps);
+        double fileSizeMB = fileSize / (1024.0 * 1024.0);
+        double timeSeconds = timeMs / 1000.0;
+        
+        log.info("İndirme kaydedildi: {} - {} MB dosya, {} saniyede indirildi (hız: {} Mbps)",
+                hash, String.format("%.2f", fileSizeMB), String.format("%.2f", timeSeconds), String.format("%.2f", speedMbps));
     }
     
     /**
@@ -82,16 +89,36 @@ public class PerformanceMonitorService {
      * @param hash Temizlenecek hash değeri
      */
     public void clearMetric(String hash) {
-        transferMetrics.remove(hash);
+        TransferMetric metric = transferMetrics.remove(hash);
+        if (metric != null) {
+            log.info("Dosya paylaşımı kapatıldı: {} - Toplam yükleme: {}, Toplam indirme: {}", 
+                    hash, metric.getUploadCount(), metric.getDownloadCount());
+        }
     }
     
     // Saatte bir istatistikleri logla
     @Scheduled(fixedRate = 3600000)
     public void logStats() {
-        log.info("Performans İstatistikleri: Toplam Yüklemeler={}, Toplam İndirmeler={}, Toplam Transfer={} MB", 
+        double totalTransferMB = totalBytesTransferred.get() / (1024.0 * 1024.0);
+        int activeShares = transferMetrics.size();
+        
+        log.info("Performans İstatistikleri: Toplam Yüklemeler={}, Toplam İndirmeler={}, " +
+                 "Toplam Transfer={} MB, Aktif Paylaşımlar={}", 
                 totalUploads.get(), 
-                totalDownloads.get(), 
-                totalBytesTransferred.get() / (1024.0 * 1024.0));
+                totalDownloads.get(),
+                String.format("%.2f", totalTransferMB),
+                activeShares);
+        
+        // Aktif paylaşımların detaylı istatistiklerini de logla
+        if (activeShares > 0) {
+            transferMetrics.forEach((hash, metric) -> {
+                log.info("Paylaşım Detayı: {} - Yükleme: {}, İndirme: {}, Ort. Hız: {} Mbps", 
+                        hash, 
+                        metric.getUploadCount(), 
+                        metric.getDownloadCount(),
+                        String.format("%.2f", metric.getAverageDownloadSpeedMbps()));
+            });
+        }
     }
     
     /**
@@ -101,6 +128,7 @@ public class PerformanceMonitorService {
      * @return Hız (Mbps)
      */
     private double calculateSpeedMbps(long bytes, long timeMs) {
+        if (timeMs <= 0) return 0.0;
         // Byte to bits (x8), bytes to megabits (/1024^2), ms to seconds (*1000)
         return bytes * 8.0 / (1024.0 * 1024.0) / (timeMs / 1000.0);
     }

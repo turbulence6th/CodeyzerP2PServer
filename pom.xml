@@ -15,9 +15,10 @@
 	<description>Codeyzer P2P File Sharing Application</description>
 
 	<properties>
-		<java.version>21</java.version>
+		<java.version>17</java.version>
 		<map.struct.version>1.5.5.Final</map.struct.version>
-		<cucumber.version>7.15.0</cucumber.version>
+		<lombok.version>1.18.30</lombok.version>
+		<jakarta.servlet-api.version>6.0.0</jakarta.servlet-api.version>
 	</properties>
 
 	<dependencies>
@@ -33,6 +34,7 @@
 		<dependency>
 			<groupId>org.projectlombok</groupId>
 			<artifactId>lombok</artifactId>
+			<version>${lombok.version}</version>
 			<optional>true</optional>
 		</dependency>
 
@@ -40,11 +42,20 @@
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-lang3</artifactId>
 		</dependency>
-
+		
+		<!-- Jakarta Servlet API bağımlılığı -->
 		<dependency>
-			<groupId>org.mockito</groupId>
-			<artifactId>mockito-junit-jupiter</artifactId>
-			<scope>test</scope>
+			<groupId>jakarta.servlet</groupId>
+			<artifactId>jakarta.servlet-api</artifactId>
+			<version>${jakarta.servlet-api.version}</version>
+			<scope>provided</scope>
+		</dependency>
+		
+		<!-- Commons IO bağımlılığı -->
+		<dependency>
+			<groupId>commons-io</groupId>
+			<artifactId>commons-io</artifactId>
+			<version>2.15.1</version>
 		</dependency>
 	</dependencies>
 
@@ -53,14 +64,6 @@
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
-				<configuration>
-					<excludes>
-						<exclude>
-							<groupId>org.projectlombok</groupId>
-							<artifactId>lombok</artifactId>
-						</exclude>
-					</excludes>
-				</configuration>
 			</plugin>
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -84,5 +87,20 @@
 			</plugin>
 		</plugins>
 	</build>
+
+	<!-- Commons FileUpload 2.0 için Maven Repository -->
+	<repositories>
+		<repository>
+			<id>apache.snapshots</id>
+			<name>Apache Development Snapshot Repository</name>
+			<url>https://repository.apache.org/content/repositories/snapshots/</url>
+			<releases>
+				<enabled>false</enabled>
+			</releases>
+			<snapshots>
+				<enabled>true</enabled>
+			</snapshots>
+		</repository>
+	</repositories>
 
 </project>
