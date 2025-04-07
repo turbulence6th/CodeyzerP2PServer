@@ -1,0 +1,43 @@
+server:
+  port: ${_PORT:8080}
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+  # Daha iyi yanıt süresi için compression aktivasyonu
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,application/javascript,application/json
+    min-response-size: 1024
+  # Daha iyi kaynakları kullanmak için tomcat ayarları
+  tomcat:
+    max-threads: 200
+    max-connections: 1000
+    connection-timeout: 30000
+    accept-count: 100
+spring:
+  servlet:
+    multipart:
+      enabled: false
+      max-file-size: -1
+      max-request-size: -1
+  # Cache ayarları
+  cache:
+    type: caffeine
+    caffeine:
+      spec: maximumSize=100,expireAfterAccess=600s
+  # Aktif profil
+  profiles:
+    active: dev
+# Dosya aktarımı ayarları
+file-share:
+  buffer-size: 8192  # 8KB
+  hash-length: 4     # Hash uzunluğu
+  # Geliştirme ayarları
+  development:
+    enabled: true
+logging:
+  level:
+    root: INFO
+    com.turbulence6th.fileshare: DEBUG
+    org.springframework.web: INFO
