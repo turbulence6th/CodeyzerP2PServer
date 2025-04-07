@@ -1,0 +1,18 @@
+server:
+  port: 8080
+
+# Geliştirme ortamı yapılandırması
+app:
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+      - http://localhost:8080
+  websocket:
+    allowed-origins:
+      - http://localhost:3000
+      - http://localhost:8080
+
+# Debug seviyesinde loglama etkinleştirme
+logging:
+  level:
+    com.codeyzer.p2p: DEBUG 

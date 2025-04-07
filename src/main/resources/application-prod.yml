@@ -1,0 +1,27 @@
+server:
+  port: 80
+  # Tomcat üretim ortamı ayarları
+  tomcat:
+    max-threads: 400
+    max-connections: 10000
+    connection-timeout: 20000
+    accept-count: 200
+  # Daha agresif kompresyon
+  compression:
+    min-response-size: 512
+
+# Üretim ortamı yapılandırması
+app:
+  cors:
+    allowed-origins:
+      - https://codeyzerp2p.tail9fb8f4.ts.net
+  websocket:
+    allowed-origins:
+      - https://codeyzerp2p.tail9fb8f4.ts.net
+
+# Üretim seviyesi loglama
+logging:
+  level:
+    root: INFO
+    com.codeyzer.p2p: INFO
+    org.springframework.web: WARN 
