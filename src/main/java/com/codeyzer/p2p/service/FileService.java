@@ -1,17 +1,5 @@
 package com.codeyzer.p2p.service;
 
-import com.codeyzer.p2p.dto.*;
-import com.codeyzer.p2p.service.monitoring.PerformanceMonitorService;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
-import org.apache.commons.io.IOUtils;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.stereotype.Service;
-import org.springframework.web.server.ResponseStatusException;
-
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,6 +8,24 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
+
+import com.codeyzer.p2p.dto.FileShareWrapper;
+import com.codeyzer.p2p.dto.FileStreamWrapper;
+import com.codeyzer.p2p.dto.ShareRequestDTO;
+import com.codeyzer.p2p.dto.ShareResponseDTO;
+import com.codeyzer.p2p.dto.SocketShareDTO;
+import com.codeyzer.p2p.dto.UnshareRequestDTO;
+import com.codeyzer.p2p.service.monitoring.PerformanceMonitorService;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -223,8 +229,21 @@ public class FileService {
      * Veri akışını sağlar
      */
     private void flow(InputStream is, OutputStream os) throws IOException {
-        // Apache Commons IO ile daha verimli veri akışı
-        IOUtils.copy(is, os, bufferSize);
+        // Manuel kopyalama ile veri akışını kontrol ediyoruz
+        byte[] buffer = new byte[bufferSize];
+        int bytesRead;
+        long totalBytes = 0;
+        
+        while ((bytesRead = is.read(buffer)) != -1) {
+            os.write(buffer, 0, bytesRead);
+            totalBytes += bytesRead;
+            
+            // Her 10MB'da bir flush yapalım
+            if (totalBytes % (10 * 1024 * 1024) < bufferSize) {
+                os.flush();
+            }
+        }
+        // Son verileri de gönderelim
         os.flush();
     }
 } 
