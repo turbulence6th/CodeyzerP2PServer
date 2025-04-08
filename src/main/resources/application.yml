@@ -39,6 +39,7 @@ file-share:
   hash-length: 4     # Hash uzunluğu
   # Kullanılmayan paylaşımları temizleme
   cleanup:
+    status: disabled
     inactive-timeout-minutes: 60  # 60 dakika inaktif olan paylaşımları temizle
     max-age-hours: 24            # 24 saatten eski paylaşımları temizle
 
