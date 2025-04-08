@@ -1,15 +1,10 @@
 package com.codeyzer.p2p.service;
 
-import java.io.Closeable;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.BrokenBarrierException;
-import java.util.concurrent.CountDownLatch;
-
+import com.codeyzer.p2p.dto.*;
+import com.codeyzer.p2p.service.monitoring.PerformanceMonitorService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
 import org.apache.commons.io.IOUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -17,17 +12,14 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.codeyzer.p2p.dto.FileShareWrapper;
-import com.codeyzer.p2p.dto.FileStreamWrapper;
-import com.codeyzer.p2p.dto.ShareRequestDTO;
-import com.codeyzer.p2p.dto.ShareResponseDTO;
-import com.codeyzer.p2p.dto.SocketShareDTO;
-import com.codeyzer.p2p.dto.UnshareRequestDTO;
-import com.codeyzer.p2p.service.monitoring.PerformanceMonitorService;
-
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.RequiredArgsConstructor;
+import java.io.Closeable;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
 
 @Service
 @RequiredArgsConstructor
@@ -93,8 +85,8 @@ public class FileService {
     /**
      * Dosya yükleme işlemini gerçekleştirir
      */
-    public void upload(String shareHash, String streamHash, HttpServletRequest request) 
-            throws IOException, BrokenBarrierException, InterruptedException {
+    public void upload(String shareHash, String streamHash, HttpServletRequest request)
+            throws IOException {
         
         FileShareWrapper fileShareWrapper = Optional.ofNullable(shareMap.get(shareHash))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dosya bulunamadı"));
@@ -103,10 +95,14 @@ public class FileService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Stream bulunamadı"));
 
         try {
-            // Doğrudan HTTP isteğinin input stream'ini alıyoruz, 
-            // böylece tüm dosya yüklenmeden önce işleme başlayabiliyoruz
+            // Multipart ayrıştırmayı yapacak ancak inputStream'i direkt olarak alacak şekilde değiştiriyoruz
             InputStream inputStream = request.getInputStream();
             fileStreamWrapper.setInputStream(inputStream);
+            
+            // İlk multipart sınır ve başlıklarını geçiyoruz
+            skipMultipartHeadersAndBoundary(inputStream);
+            
+            // Akış işlemini başlatıyoruz
             flow(inputStream, fileStreamWrapper.getOutputStream());
             fileStreamWrapper.setStatus(1);
             
@@ -116,6 +112,27 @@ public class FileService {
             Optional.ofNullable(fileStreamWrapper)
                     .map(FileStreamWrapper::getLatch)
                     .ifPresent(CountDownLatch::countDown);
+        }
+    }
+    
+    /**
+     * Multipart sınırlarını ve başlıkları atlayarak dosya içeriğine geçer
+     */
+    private void skipMultipartHeadersAndBoundary(InputStream inputStream) throws IOException {
+        // Basit bir multipart ayrıştırıcı
+        byte[] buffer = new byte[8192];
+        int read;
+        StringBuilder headerBuilder = new StringBuilder();
+        boolean inHeaders = true;
+        
+        while (inHeaders && (read = inputStream.read(buffer, 0, 1)) != -1) {
+            char c = (char) buffer[0];
+            headerBuilder.append(c);
+            
+            // İki kez CRLF görürsek, başlıklar bitmiş ve dosya içeriğine ulaşmış demektir
+            if (headerBuilder.toString().endsWith("\r\n\r\n")) {
+                inHeaders = false;
+            }
         }
     }
 
