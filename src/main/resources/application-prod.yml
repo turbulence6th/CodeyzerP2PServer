@@ -14,10 +14,10 @@ server:
 app:
   cors:
     allowed-origins:
-      - https://codeyzerp2p.tail9fb8f4.ts.net
+      - https://p2p.codeyzer.com
   websocket:
     allowed-origins:
-      - https://codeyzerp2p.tail9fb8f4.ts.net
+      - https://p2p.codeyzer.com
 
 # Üretim seviyesi loglama
 logging:
