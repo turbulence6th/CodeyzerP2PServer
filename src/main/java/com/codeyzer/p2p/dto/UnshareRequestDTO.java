@@ -10,4 +10,5 @@ import lombok.*;
 public class UnshareRequestDTO {
 
     private String shareHash;
+    private String ownerToken;
 }

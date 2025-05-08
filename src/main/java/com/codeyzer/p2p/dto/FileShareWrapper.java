@@ -14,4 +14,11 @@ public class FileShareWrapper {
     private String filename;
     private Long size;
     private Map<String, FileStreamWrapper> streamMap;
+
+    @Builder.Default
+    private final long creationTimestamp = 0L;
+    private long lastHeartbeatTimestamp;
+    
+    @Builder.Default
+    private final String ownerToken = "";
 }

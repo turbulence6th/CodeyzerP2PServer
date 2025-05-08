@@ -8,12 +8,13 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 import com.codeyzer.p2p.dto.FileShareWrapper;
 import com.codeyzer.p2p.dto.FileStreamWrapper;
@@ -21,23 +22,25 @@ import com.codeyzer.p2p.dto.ShareRequestDTO;
 import com.codeyzer.p2p.dto.ShareResponseDTO;
 import com.codeyzer.p2p.dto.SocketShareDTO;
 import com.codeyzer.p2p.dto.UnshareRequestDTO;
+import com.codeyzer.p2p.dto.FileInfoDTO;
 import com.codeyzer.p2p.service.monitoring.PerformanceMonitorService;
+import com.codeyzer.p2p.config.FileShareProperties;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class FileService {
 
     private final Map<String, FileShareWrapper> shareMap;
     private final SimpMessagingTemplate template;
     private final HashService hashService;
     private final PerformanceMonitorService monitorService;
-    
-    @Value("${file-share.buffer-size:8192}")
-    private int bufferSize;
+    private final FileShareProperties fileShareProperties;
 
     /**
      * Dosya paylaşımı başlatır
@@ -52,14 +55,23 @@ public class FileService {
             shareHash = hashService.generateHash();
         } while (shareMap.containsKey(shareHash));
 
-        shareMap.put(shareHash, FileShareWrapper.builder()
+        long currentTime = System.currentTimeMillis();
+        String ownerToken = UUID.randomUUID().toString();
+
+        FileShareWrapper newShare = FileShareWrapper.builder()
                 .filename(request.getFilename())
                 .size(request.getSize())
-                .streamMap(new HashMap<>())
-                .build());
+                .streamMap(new ConcurrentHashMap<>())
+                .creationTimestamp(currentTime)
+                .lastHeartbeatTimestamp(currentTime)
+                .ownerToken(ownerToken)
+                .build();
+
+        shareMap.put(shareHash, newShare);
                 
         return ShareResponseDTO.builder()
                 .shareHash(shareHash)
+                .ownerToken(ownerToken)
                 .build();
     }
 
@@ -67,25 +79,36 @@ public class FileService {
      * Dosya paylaşımını sonlandırır
      */
     public void unshare(UnshareRequestDTO request) {
-        if (request.getShareHash() == null) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Share hash zorunludur");
+        if (request.getShareHash() == null || request.getOwnerToken() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Share hash ve owner token zorunludur");
         }
 
-        FileShareWrapper fileShareWrapper = Optional.ofNullable(shareMap.get(request.getShareHash()))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dosya bulunamadı"));
-                
-        fileShareWrapper.getStreamMap().values().forEach(fileStreamWrapper -> {
-            forceClose(fileStreamWrapper.getInputStream());
-            forceClose(fileStreamWrapper.getOutputStream());
-            fileStreamWrapper.setStatus(-1);
-            Optional.ofNullable(fileStreamWrapper.getLatch())
-                    .ifPresent(CountDownLatch::countDown);
-        });
+        FileShareWrapper fileShareWrapper = shareMap.get(request.getShareHash());
+
+        if (fileShareWrapper == null) {
+            log.info("Unshare request for non-existent or already cleaned up share: {}", request.getShareHash());
+            return;
+        }
+
+        if (!fileShareWrapper.getOwnerToken().equals(request.getOwnerToken())) {
+            log.warn("Unauthorized unshare attempt for share: {} with token: {}", request.getShareHash(), request.getOwnerToken());
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Yetkisiz işlem: Geçersiz sahip tokenı");
+        }
         
-        // Performans metriklerini temizle
-        monitorService.clearMetric(request.getShareHash());
-        
-        shareMap.remove(request.getShareHash());
+        log.info("Unsharing file: {} requested by owner.", request.getShareHash());
+        try {
+             fileShareWrapper.getStreamMap().values().forEach(fileStreamWrapper -> {
+                forceClose(fileStreamWrapper.getInputStream());
+                forceClose(fileStreamWrapper.getOutputStream());
+                fileStreamWrapper.setStatus(-1);
+                Optional.ofNullable(fileStreamWrapper.getLatch())
+                        .ifPresent(CountDownLatch::countDown);
+            });
+        } finally {
+            monitorService.clearMetric(request.getShareHash());
+            shareMap.remove(request.getShareHash());
+            log.info("Successfully unshared: {}", request.getShareHash());
+        }        
     }
 
     /**
@@ -94,25 +117,39 @@ public class FileService {
     public void upload(String shareHash, String streamHash, HttpServletRequest request)
             throws IOException {
         
-        FileShareWrapper fileShareWrapper = Optional.ofNullable(shareMap.get(shareHash))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dosya bulunamadı"));
-                
-        FileStreamWrapper fileStreamWrapper = Optional.ofNullable(fileShareWrapper.getStreamMap().get(streamHash))
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Stream bulunamadı"));
+        // Owner Token kontrolü
+        String ownerTokenHeader = request.getHeader("X-Owner-Token");
+        if (ownerTokenHeader == null || ownerTokenHeader.trim().isEmpty()) {
+            log.warn("Upload attempt for share {} without X-Owner-Token header.", shareHash);
+            throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Eksik sahip tokenı");
+        }
+
+        FileShareWrapper fileShareWrapper = shareMap.get(shareHash);
+        if (fileShareWrapper == null) {
+             log.warn("Upload attempt for non-existent share: {}", shareHash);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Dosya paylaşımı bulunamadı");
+        }
+
+        // Owner token'ı doğrula
+        if (!fileShareWrapper.getOwnerToken().equals(ownerTokenHeader)) {
+             log.warn("Unauthorized upload attempt for share: {} with token: {}", shareHash, ownerTokenHeader);
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Yetkisiz işlem: Geçersiz sahip tokenı");
+        }
+
+        // Token doğrulandı, işleme devam et
+        log.info("Authorized upload starting for share: {} with stream: {}", shareHash, streamHash);
+        FileStreamWrapper fileStreamWrapper = fileShareWrapper.getStreamMap().get(streamHash);
+        if (fileStreamWrapper == null) {
+             log.warn("Upload attempt for non-existent stream: {} for share: {}", streamHash, shareHash);
+             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Stream bulunamadı");
+        }
 
         try {
-            // Multipart ayrıştırmayı yapacak ancak inputStream'i direkt olarak alacak şekilde değiştiriyoruz
             InputStream inputStream = request.getInputStream();
             fileStreamWrapper.setInputStream(inputStream);
-            
-            // İlk multipart sınır ve başlıklarını geçiyoruz
             skipMultipartHeadersAndBoundary(inputStream);
-            
-            // Akış işlemini başlatıyoruz
             flow(inputStream, fileStreamWrapper.getOutputStream());
             fileStreamWrapper.setStatus(1);
-            
-            // Yükleme performans metriğini kaydet
             monitorService.recordUpload(shareHash, fileShareWrapper.getSize());
         } finally {
             Optional.ofNullable(fileStreamWrapper)
@@ -229,8 +266,7 @@ public class FileService {
      * Veri akışını sağlar
      */
     private void flow(InputStream is, OutputStream os) throws IOException {
-        // Manuel kopyalama ile veri akışını kontrol ediyoruz
-        byte[] buffer = new byte[bufferSize];
+        byte[] buffer = new byte[fileShareProperties.getBufferSize()];
         int bytesRead;
         long totalBytes = 0;
         
@@ -238,12 +274,52 @@ public class FileService {
             os.write(buffer, 0, bytesRead);
             totalBytes += bytesRead;
             
-            // Her 10MB'da bir flush yapalım
-            if (totalBytes % (10 * 1024 * 1024) < bufferSize) {
+            if (totalBytes % (10 * 1024 * 1024) < fileShareProperties.getBufferSize()) {
                 os.flush();
             }
         }
-        // Son verileri de gönderelim
         os.flush();
+    }
+
+    /**
+     * Verilen hash'e ait dosya bilgilerini döndürür
+     */
+    public FileInfoDTO getFileInfo(String hash) {
+        FileShareWrapper fileShareWrapper = Optional.ofNullable(shareMap.get(hash))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Dosya bulunamadı hash: " + hash));
+
+        // Dosya tipi için basit bir çıkarım yapılabilir veya FileShareWrapper'a eklenebilir.
+        // Şimdilik dosya adından uzantıyı alarak basit bir çıkarım yapalım.
+        String fileName = fileShareWrapper.getFilename();
+        String fileType = "unknown";
+        int lastDotIndex = fileName.lastIndexOf('.');
+        if (lastDotIndex > 0 && lastDotIndex < fileName.length() - 1) {
+            fileType = fileName.substring(lastDotIndex + 1);
+        }
+
+        return new FileInfoDTO(
+                fileShareWrapper.getFilename(),
+                fileShareWrapper.getSize(),
+                fileType
+        );
+    }
+
+    /**
+     * Verilen shareHash için son kalp atışı zamanını günceller.
+     * @param shareHash Kalp atışı alınan paylaşımın hash'i.
+     */
+    public void updateHeartbeat(String shareHash, String ownerToken) {
+        FileShareWrapper shareWrapper = shareMap.get(shareHash);
+        if (shareWrapper != null) {
+            if (shareWrapper.getOwnerToken() != null && shareWrapper.getOwnerToken().equals(ownerToken)) {
+                shareWrapper.setLastHeartbeatTimestamp(System.currentTimeMillis());
+                log.debug("Heartbeat updated for share: {} with matching owner token", shareHash);
+            } else {
+                log.warn("Heartbeat received for share: {} with MISMATCHING owner token. Provided: {}, Expected: {}. Heartbeat NOT updated.", 
+                         shareHash, ownerToken, shareWrapper.getOwnerToken());
+            }
+        } else {
+            log.warn("Heartbeat received for non-existent or already cleaned up share: {}", shareHash);
+        }
     }
 } 

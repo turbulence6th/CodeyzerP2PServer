@@ -3,6 +3,7 @@ package com.codeyzer.p2p.service;
 import java.security.SecureRandom;
 import java.util.concurrent.ThreadLocalRandom;
 
+import com.codeyzer.p2p.config.FileShareProperties;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -14,8 +15,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class HashService {
 
-    @Value("${file-share.hash-length:4}")
-    private int hashLength;
+    private final FileShareProperties fileShareProperties;
     
     private SecureRandom secureRandom;
     
@@ -32,7 +32,7 @@ public class HashService {
      */
     public String generateHash() {
         // Daha güvenli rastgele değer oluşturma
-        return RandomStringUtils.random(hashLength, 0, 0, true, true, null, secureRandom);
+        return RandomStringUtils.random(fileShareProperties.getHashLength(), 0, 0, true, true, null, secureRandom);
     }
     
     /**
@@ -40,6 +40,6 @@ public class HashService {
      * @return Rastgele oluşturulmuş alfanumerik bir string
      */
     public String generateFastHash() {
-        return RandomStringUtils.random(hashLength, 0, 0, true, true, null, ThreadLocalRandom.current());
+        return RandomStringUtils.random(fileShareProperties.getHashLength(), 0, 0, true, true, null, ThreadLocalRandom.current());
     }
 }

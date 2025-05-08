@@ -1,0 +1,82 @@
+## CodeyzerP2PServer Projesi Özeti (.cursorrules)
+
+Bu dosya, CodeyzerP2PServer projesi hakkında şimdiye kadar biriktirilen önemli bilgileri ve kararları özetlemektedir.
+
+### Genel Amaç
+CodeyzerP2PServer, Java Spring Boot tabanlı bir sunucu uygulamasıdır. Temel amacı, kullanıcıların dosyalarını eşler arası (P2P) bir şekilde paylaşmalarını sağlamak için gerekli altyapıyı sunmaktır. Bu, paylaşım bağlantıları oluşturma, dosya bilgilerini sorgulama ve paylaşımların ömrünü yönetme gibi işlevleri içerir.
+
+### Temel Özellikler ve Geliştirme Noktaları
+
+1.  **Yeni Sunucu Endpoint'i (`/file/info/{hash}`):**
+    *   **Amaç:** İstemcilerin, bir paylaşıma ait dosyanın temel bilgilerini (ad, boyut, tip) almasını sağlamak.
+    *   **Rota:** `GET /file/info/{hash}`
+    *   **Parametre:** `hash` (String) - Paylaşımın benzersiz tanımlayıcısı.
+    *   **Dönen Değer:** `FileInfoDTO` (dosya adı, dosya boyutu, dosya tipi).
+    *   **İlgili Sınıflar:** `FileController`, `FileService`.
+
+2.  **Dosya Paylaşım Mekanizması ve Sahip Doğrulama:**
+    *   **Paylaşım Başlatma (`FileService.share`):**
+        *   Bir dosya paylaşıldığında, sunucu benzersiz bir `shareHash` oluşturur.
+        *   Bu `shareHash` ile birlikte, sadece paylaşımı başlatan kişiye özel gizli bir `ownerToken` (UUID formatında) üretilir ve istemciye döndürülür.
+    *   **Sahip Doğrulama Amacı:** `ownerToken`, daha sonra paylaşımın gerçekten sahibi tarafından yönetildiğini (örneğin, kalp atışı gönderme, paylaşımı geri alma gibi senaryolarda) doğrulamak için kullanılacaktır.
+
+3.  **İndirme Süreci ve Askıda Kalma Sorunu Çözümü (Planlanan):**
+    *   **Mevcut Durum:** `FileService.download` metodunda, göndericinin dosyayı göndermeye başlamasını beklemek için bir `CountDownLatch` (`latch.await()`) kullanılır.
+    *   **Sorun:** Gönderici bağlantısı koparsa veya yüklemeyi hiç başlatmazsa, alıcının indirme isteği süresiz olarak askıda kalabilir.
+    *   **Planlanan Çözüm:** `latch.await()` çağrısına makul bir zaman aşımı (timeout) eklenmesi düşünülmektedir. Bu, belirtilen süre içinde göndericiden yanıt alınamazsa indirme işleminin sonlandırılmasını sağlayacaktır (Bu adım henüz kodlanmadı).
+
+4.  **Paylaşım Temizleme Mekanizması (Heartbeat Tabanlı):**
+    *   **Eski Yöntem:** Daha önce inaktiviteye dayalı bir temizleme mekanizması vardı (`InactivityCleanupProperties`). Bu yöntem kaldırıldı.
+    *   **Yeni Yöntem:** Kalp atışı (heartbeat) tabanlı bir temizleme mekanizması geliştirildi.
+        *   **Yapılandırma Sınıfı:** `FileShareProperties.java` içinde `HeartbeatCleanupProperties` adlı bir iç sınıf tanımlandı. Bu sınıf şu ayarları içerir:
+            *   `enabled`: Mekanizmanın aktif olup olmadığını belirtir (varsayılan: `false`).
+            *   `staleTimeoutSeconds`: Bir paylaşımın "bayatlamış" (stale) sayılması için son kalp atışından sonra geçmesi gereken süre (saniye, varsayılan: `120`).
+            *   `initialGracePeriodSeconds`: Paylaşım oluşturulduktan sonra ilk kalp atışı için tanınacak ek süre (saniye, varsayılan: `180`).
+            *   `checkIntervalSeconds`: Bayatlamış paylaşımları kontrol etme ve temizleme işleminin ne sıklıkla çalışacağı (saniye, varsayılan: `60`).
+        *   **Yapılandırma Dosyası (`application.yml`):**
+            *   `file-share.cleanup` bölümü kaldırıldı.
+            *   `file-share.heartbeat` bölümü eklendi.
+            *   `application.yml` dosyasında şu anda `stale-timeout-seconds` ve `initial-grace-period-seconds` ayarları bulunmaktadır. `enabled` ve `check-interval-seconds` ayarları `application.yml`'den çıkarıldığı için `FileShareProperties.java`'daki varsayılan değerlerini almaktadırlar.
+
+5.  **Sekme Kapatma / Terk Edilmiş Paylaşımların Yönetimi (Planlanan):**
+    *   **Senaryo:** Paylaşan kişi tarayıcı sekmesini kapattığında, WebSocket bağlantısı kopar.
+    *   **Hedef:** Paylaşımın hemen silinmemesi (kısa süreli kopmalar için), ancak sahibi tarafından aktif tutulmadığı takdirde belirli bir süre sonra temizlenmesi.
+    *   **Planlanan Çözüm:**
+        *   Paylaşım sahibi istemci, periyodik olarak sunucuya bir "kalp atışı" sinyali gönderir. Bu sinyal, paylaşımın hala aktif olduğunu belirtir.
+        *   Bu kalp atışı için muhtemelen `ownerToken` kullanılarak bir `/file/heartbeat/{shareHash}` (veya benzeri bir) endpoint'i oluşturulacaktır. İstemci, bu endpoint'e `ownerToken`'ını göndererek paylaşımın sahipliğini kanıtlayacak ve ömrünü uzatacaktır.
+        *   Eğer belirli bir süre boyunca (`staleTimeoutSeconds` + `initialGracePeriodSeconds`) kalp atışı alınmazsa, paylaşım "bayatlamış" olarak işaretlenir ve `checkIntervalSeconds` aralıklarıyla çalışan temizleme görevi tarafından kaldırılır.
+        *   Bu, paylaşım sahibinin istemci tarafında (örneğin, `localStorage` veya `sessionStorage`'da) `shareHash` ve `ownerToken` ikilisini saklamasını gerektirir.
+
+6.  **Mevcut Diğer FileController Endpoint'leri (Temel İşlevsellik):**
+    *   Bu endpoint'ler, projenin sizinle birlikte yaptığımız son geliştirmelerden önceki temel dosya paylaşım altyapısını oluşturur.
+    *   **`POST /file/share`**:
+        *   **Amaç:** Yeni bir dosya paylaşımı başlatmak.
+        *   **İstek Gövdesi (`RequestBody`):** `ShareRequestDTO` (paylaşılacak dosyanın adı, boyutu gibi meta verileri içerir).
+        *   **Dönen Değer:** `ShareResponseDTO` (oluşturulan `shareHash` ve `ownerToken` gibi bilgileri içerir).
+        *   **İlgili Servis Metodu:** `fileService.share(request)`.
+    *   **`POST /file/unshare`**:
+        *   **Amaç:** Mevcut bir dosya paylaşımını sonlandırmak.
+        *   **İstek Gövdesi (`RequestBody`):** `UnshareRequestDTO` (`shareHash` ve muhtemelen sahip doğrulaması için `ownerToken` içerir).
+        *   **İlgili Servis Metodu:** `fileService.unshare(request)`.
+    *   **`POST /file/upload/{shareHash}/{streamHash}`**:
+        *   **Amaç:** Paylaşılacak dosyanın parçalarını (chunk) sunucuya yüklemek.
+        *   **Yol Parametreleri (`PathVariable`):** `shareHash` (ilgili paylaşımı belirtir), `streamHash` (muhtemelen belirli bir veri akışını veya parçasını tanımlar).
+        *   **İstek (`HttpServletRequest`):** Yüklenecek dosya verisini içerir.
+        *   **İlgili Servis Metodu:** `fileService.upload(shareHash, streamHash, request)`.
+    *   **`GET /file/download/{shareHash}`**:
+        *   **Amaç:** Paylaşılan bir dosyayı indirmek.
+        *   **Yol Parametresi (`PathVariable`):** `shareHash` (indirilecek dosyayı belirtir).
+        *   **Yanıt (`HttpServletResponse`):** Dosya verisi istemciye bu yanıt üzerinden akıtılır.
+        *   **İlgili Servis Metodu:** `fileService.download(shareHash, request, response)`.
+    *   **`GET /file/stats/{shareHash}`**:
+        *   **Amaç:** Belirli bir paylaşımla ilgili istatistikleri veya durumu almak (örn: bağlı istemci sayısı, indirme ilerlemesi vb.).
+        *   **Yol Parametresi (`PathVariable`):** `shareHash` (istatistikleri istenen paylaşımı belirtir).
+        *   **Dönen Değer:** `Map<String, Object>` (çeşitli istatistiksel verileri içerir).
+        *   **İlgili Servis Metodu:** `fileService.getStats(shareHash)`.
+
+### Yapılandırma Dosyaları
+*   `pom.xml`: Proje bağımlılıklarını ve yapılandırma bilgilerini içerir.
+*   `application.yml`: Spring Boot uygulama yapılandırmalarını (sunucu portu, veritabanı bağlantıları, `file-share` ayarları vb.) barındırır.
+*   `FileShareProperties.java`: `application.yml`'deki `file-share` ile başlayan özel yapılandırmaları Java nesnelerine eşler.
+
+Bu özet, projenin mevcut durumunu ve gelecekteki geliştirme yönlerini yansıtmaktadır. 

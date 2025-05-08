@@ -39,11 +39,9 @@ spring:
 file-share:
   buffer-size: 8192  # 8KB
   hash-length: 4     # Hash uzunluğu
-  # Kullanılmayan paylaşımları temizleme
-  cleanup:
-    status: disabled
-    inactive-timeout-minutes: 60  # 60 dakika inaktif olan paylaşımları temizle
-    max-age-hours: 24            # 24 saatten eski paylaşımları temizle
+  heartbeat:                  # Kalp atışı tabanlı temizleme mekanizması aktif mi?
+    stale-timeout-seconds: 120          # Son kalp atışından sonra bayatlama süresi (saniye)
+    initial-grace-period-seconds: 180   # İlk kalp atışı için ek süre (saniye)
 
 # Varsayılan loglama
 logging:

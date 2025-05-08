@@ -1,5 +1,6 @@
 package com.codeyzer.p2p.controller;
 
+import com.codeyzer.p2p.dto.FileInfoDTO;
 import com.codeyzer.p2p.dto.ShareRequestDTO;
 import com.codeyzer.p2p.dto.ShareResponseDTO;
 import com.codeyzer.p2p.dto.UnshareRequestDTO;
@@ -48,5 +49,11 @@ public class FileController {
     @GetMapping("/stats/{shareHash}")
     public Map<String, Object> getStats(@PathVariable String shareHash) {
         return fileService.getStats(shareHash);
+    }
+
+    @GetMapping("/info/{hash}")
+    public FileInfoDTO getFileInfo(@PathVariable String hash) {
+        // Bu metodun FileService içinde tanımlanması gerekecek
+        return fileService.getFileInfo(hash);
     }
 }

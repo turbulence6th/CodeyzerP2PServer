@@ -27,7 +27,7 @@ public class CorsFilter implements Filter {
     private static final String ALLOWED_METHODS = "POST, GET, OPTIONS, DELETE, PUT";
 
     // CORS için izin verilen HTTP başlıkları
-    private static final String ALLOWED_HEADERS = "Authorization, Content-Type, Accept, X-Requested-With";
+    private static final String ALLOWED_HEADERS = "Authorization, Content-Type, Accept, X-Requested-With, x-owner-token";
 
     // CORS için izin verilen Header'ların istemciye gönderilmesi
     private static final String EXPOSED_HEADERS = "Content-Disposition, Content-Length";
